@@ -6,6 +6,7 @@ using System.Text.Json;
 using Microsoft.AspNetCore.Mvc.Testing;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.Extensions.DependencyInjection;
+using ProductRequests.Domain.Common;
 using ProductRequests.Domain.Offers;
 using ProductRequests.Domain.ProductRequests;
 using ProductRequests.Infrastructure.Persistence;
@@ -103,6 +104,88 @@ public sealed class NegotiationApiTests(MySqlFixture database) : IAsyncLifetime
         ProductRequestsDbContext context = scope.ServiceProvider.GetRequiredService<ProductRequestsDbContext>();
         Assert.Equal(1, await context.Offers.CountAsync(item =>
             item.ProductRequestId == setup.RequestId && item.Status == OfferStatus.Accepted));
+    }
+
+    [Fact]
+    public async Task ClientRejectsInitialOfferWithoutClosingRequest()
+    {
+        NegotiationSetup setup = await CreateSetupAsync();
+        await AuthenticateAsync("client@example.com");
+
+        HttpResponseMessage response = await _client.PostAsJsonAsync(
+            $"/api/offers/{setup.Offer1Id}/reject",
+            new { reason = "Price exceeds budget" });
+
+        response.EnsureSuccessStatusCode();
+        OfferDecisionPayload result = (await response.Content.ReadFromJsonAsync<OfferDecisionPayload>())!;
+        Assert.Equal("Rejected", result.OfferStatus);
+        Assert.Equal("Open", result.ProductRequestStatus);
+        await using AsyncServiceScope scope = _factory.Services.CreateAsyncScope();
+        ProductRequestsDbContext context = scope.ServiceProvider.GetRequiredService<ProductRequestsDbContext>();
+        ProductRequest request = await context.ProductRequests.Include(item => item.Offers)
+            .ThenInclude(item => item.Histories)
+            .SingleAsync(item => item.Id == setup.RequestId);
+        Assert.Equal(OfferStatus.PendingClientDecision,
+            request.Offers.Single(item => item.Id == setup.Offer2Id).Status);
+        Assert.Contains(request.Offers.Single(item => item.Id == setup.Offer1Id).Histories,
+            item => item.Action == OfferHistoryAction.OfferRejectedByClient &&
+                    item.Comment == "Price exceeds budget");
+    }
+
+    [Fact]
+    public async Task RejectInitialEnforcesActorStateAndConcurrency()
+    {
+        NegotiationSetup setup = await CreateSetupAsync();
+        await AuthenticateAsync("client2@example.com");
+        Assert.Equal(HttpStatusCode.Forbidden,
+            (await _client.PostAsJsonAsync(
+                $"/api/offers/{setup.Offer1Id}/reject",
+                new { reason = "No" })).StatusCode);
+        await AuthenticateAsync("provider1@example.com");
+        Assert.Equal(HttpStatusCode.Forbidden,
+            (await _client.PostAsJsonAsync(
+                $"/api/offers/{setup.Offer1Id}/reject",
+                new { reason = "No" })).StatusCode);
+
+        await AuthenticateAsync("client@example.com");
+        Task<HttpResponseMessage> first = _client.PostAsJsonAsync(
+            $"/api/offers/{setup.Offer1Id}/reject",
+            new { reason = "First" });
+        Task<HttpResponseMessage> second = _client.PostAsJsonAsync(
+            $"/api/offers/{setup.Offer1Id}/reject",
+            new { reason = "Second" });
+        HttpResponseMessage[] responses = await Task.WhenAll(first, second);
+        Assert.Single(responses, item => item.StatusCode == HttpStatusCode.OK);
+        Assert.Single(responses, item => item.StatusCode == HttpStatusCode.Conflict);
+    }
+
+    [Fact]
+    public async Task InitialRejectDoesNotHandlePendingProviderDecision()
+    {
+        NegotiationSetup setup = await CreateSetupAsync();
+        await using (AsyncServiceScope scope = _factory.Services.CreateAsyncScope())
+        {
+            ProductRequestsDbContext context = scope.ServiceProvider.GetRequiredService<ProductRequestsDbContext>();
+            ProductRequest request = await context.ProductRequests.Include(item => item.Offers)
+                .ThenInclude(item => item.Histories)
+                .SingleAsync(item => item.Id == setup.RequestId);
+            Guid clientId = await context.Users.Where(user => user.NormalizedEmail == "CLIENT@EXAMPLE.COM")
+                .Select(user => user.Id)
+                .SingleAsync();
+            request.SubmitCounterOffer(
+                setup.Offer1Id,
+                clientId,
+                new Money(80, "USD"),
+                DateTimeOffset.UtcNow);
+            await context.SaveChangesAsync();
+        }
+
+        await AuthenticateAsync("client@example.com");
+        HttpResponseMessage response = await _client.PostAsJsonAsync(
+            $"/api/offers/{setup.Offer1Id}/reject",
+            new { reason = "Wrong endpoint" });
+
+        Assert.Equal(HttpStatusCode.Conflict, response.StatusCode);
     }
 
     private async Task<NegotiationSetup> CreateSetupAsync()

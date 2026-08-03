@@ -7,3 +7,5 @@ public sealed record OfferDecisionDto(
     string ProductRequestStatus,
     decimal? AgreedAmount,
     Guid? AcceptedOfferId);
+
+public sealed record RejectOfferCommand(string? Reason);

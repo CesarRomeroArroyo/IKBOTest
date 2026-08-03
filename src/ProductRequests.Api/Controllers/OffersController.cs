@@ -46,4 +46,12 @@ public sealed class OffersController(OfferService service, NegotiationService ne
     [Authorize(Policy = PolicyNames.Client)]
     public Task<OfferDecisionDto> AcceptInitial(Guid offerId, CancellationToken cancellationToken) =>
         negotiation.AcceptInitialAsync(offerId, cancellationToken);
+
+    [HttpPost("offers/{offerId:guid}/reject")]
+    [Authorize(Policy = PolicyNames.Client)]
+    public Task<OfferDecisionDto> RejectInitial(
+        Guid offerId,
+        RejectOfferCommand command,
+        CancellationToken cancellationToken) =>
+        negotiation.RejectInitialAsync(offerId, command.Reason, cancellationToken);
 }

@@ -23,6 +23,20 @@ public sealed class NegotiationService(
             return Map(request, offer);
         }, cancellationToken);
 
+    public Task<OfferDecisionDto> RejectInitialAsync(
+        Guid offerId,
+        string? reason,
+        CancellationToken cancellationToken) =>
+        unitOfWork.ExecuteInTransactionAsync(async transactionToken =>
+        {
+            ProductRequest request = await requests.GetByOfferIdForUpdateAsync(offerId, transactionToken)
+                ?? throw new ResourceNotFoundException("OFFER_NOT_FOUND", "Offer was not found.");
+            Offer offer = request.Offers.Single(item => item.Id == offerId);
+            authorization.EnsureClientOwns(request);
+            request.RejectInitialOffer(offerId, currentUser.Id, DateTimeOffset.UtcNow, reason);
+            return Map(request, offer);
+        }, cancellationToken);
+
     private static OfferDecisionDto Map(ProductRequest request, Offer offer) => new(
         offer.Id,
         request.Id,
