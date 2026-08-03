@@ -1,6 +1,7 @@
 using Microsoft.OpenApi.Models;
 using Microsoft.AspNetCore.Mvc;
 using ProductRequests.Application;
+using ProductRequests.Api.Authorization;
 using ProductRequests.Api.ExceptionHandling;
 using ProductRequests.Infrastructure;
 
@@ -48,6 +49,7 @@ builder.Services.AddExceptionHandler<ApiExceptionHandler>();
 builder.Services.AddHealthChecks();
 builder.Services.AddApplication();
 builder.Services.AddInfrastructure(builder.Configuration);
+builder.Services.AddProductRequestAuthorization();
 
 var app = builder.Build();
 
