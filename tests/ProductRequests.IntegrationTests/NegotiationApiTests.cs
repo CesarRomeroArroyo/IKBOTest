@@ -188,6 +188,71 @@ public sealed class NegotiationApiTests(MySqlFixture database) : IAsyncLifetime
         Assert.Equal(HttpStatusCode.Conflict, response.StatusCode);
     }
 
+    [Fact]
+    public async Task ClientSubmitsSingleCounterOffer()
+    {
+        NegotiationSetup setup = await CreateSetupAsync();
+        await AuthenticateAsync("client@example.com");
+
+        HttpResponseMessage response = await _client.PostAsJsonAsync(
+            $"/api/offers/{setup.Offer1Id}/counter-offer",
+            new { amount = 80, currency = "USD", comment = "Budget adjustment" });
+
+        response.EnsureSuccessStatusCode();
+        OfferDecisionPayload result = (await response.Content.ReadFromJsonAsync<OfferDecisionPayload>())!;
+        Assert.Equal("PendingProviderDecision", result.OfferStatus);
+        Assert.Equal("Open", result.ProductRequestStatus);
+        await using AsyncServiceScope scope = _factory.Services.CreateAsyncScope();
+        ProductRequestsDbContext context = scope.ServiceProvider.GetRequiredService<ProductRequestsDbContext>();
+        Offer offer = await context.Offers.Include(item => item.Histories)
+            .SingleAsync(item => item.Id == setup.Offer1Id);
+        Assert.Equal(80m, offer.CounterAmount);
+        Assert.Contains(offer.Histories,
+            item => item.Action == OfferHistoryAction.CounterOfferSubmittedByClient &&
+                    item.Comment == "Budget adjustment");
+
+        HttpResponseMessage second = await _client.PostAsJsonAsync(
+            $"/api/offers/{setup.Offer1Id}/counter-offer",
+            new { amount = 75, currency = "USD", comment = "Second" });
+        Assert.Equal(HttpStatusCode.Conflict, second.StatusCode);
+    }
+
+    [Fact]
+    public async Task CounterOfferValidatesActorMoneyAndConcurrency()
+    {
+        NegotiationSetup setup = await CreateSetupAsync();
+        await AuthenticateAsync("client2@example.com");
+        Assert.Equal(HttpStatusCode.Forbidden,
+            (await _client.PostAsJsonAsync(
+                $"/api/offers/{setup.Offer1Id}/counter-offer",
+                new { amount = 80, currency = "USD", comment = "No" })).StatusCode);
+        await AuthenticateAsync("provider1@example.com");
+        Assert.Equal(HttpStatusCode.Forbidden,
+            (await _client.PostAsJsonAsync(
+                $"/api/offers/{setup.Offer1Id}/counter-offer",
+                new { amount = 80, currency = "USD", comment = "No" })).StatusCode);
+
+        await AuthenticateAsync("client@example.com");
+        Assert.Equal(HttpStatusCode.BadRequest,
+            (await _client.PostAsJsonAsync(
+                $"/api/offers/{setup.Offer1Id}/counter-offer",
+                new { amount = 0, currency = "USD", comment = "Invalid" })).StatusCode);
+        Assert.Equal(HttpStatusCode.Conflict,
+            (await _client.PostAsJsonAsync(
+                $"/api/offers/{setup.Offer1Id}/counter-offer",
+                new { amount = 80, currency = "EUR", comment = "Invalid" })).StatusCode);
+
+        Task<HttpResponseMessage> first = _client.PostAsJsonAsync(
+            $"/api/offers/{setup.Offer1Id}/counter-offer",
+            new { amount = 80, currency = "USD", comment = "First" });
+        Task<HttpResponseMessage> second = _client.PostAsJsonAsync(
+            $"/api/offers/{setup.Offer1Id}/counter-offer",
+            new { amount = 75, currency = "USD", comment = "Second" });
+        HttpResponseMessage[] responses = await Task.WhenAll(first, second);
+        Assert.Single(responses, item => item.StatusCode == HttpStatusCode.OK);
+        Assert.Single(responses, item => item.StatusCode == HttpStatusCode.Conflict);
+    }
+
     private async Task<NegotiationSetup> CreateSetupAsync()
     {
         await AuthenticateAsync("client@example.com");

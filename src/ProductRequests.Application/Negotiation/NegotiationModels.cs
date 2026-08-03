@@ -9,3 +9,5 @@ public sealed record OfferDecisionDto(
     Guid? AcceptedOfferId);
 
 public sealed record RejectOfferCommand(string? Reason);
+
+public sealed record CounterOfferCommand(decimal Amount, string? Currency, string? Comment);
