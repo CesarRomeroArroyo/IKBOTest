@@ -1,6 +1,7 @@
 using System.Data.Common;
 using System.Globalization;
 using Microsoft.EntityFrameworkCore;
+using ProductRequests.Api.ExceptionHandling;
 using ProductRequests.Domain.Common;
 using ProductRequests.Domain.ProductRequests;
 using ProductRequests.Domain.Users;
@@ -80,6 +81,8 @@ public sealed class PersistenceTests(MySqlFixture fixture)
         Exception error = await Assert.ThrowsAnyAsync<Exception>(() => command.ExecuteNonQueryAsync());
 
         Assert.Contains("UX_Offers_ProductRequestId_ProviderId", error.Message, StringComparison.Ordinal);
+        ExceptionDescriptor descriptor = ExceptionDescriptor.From(new DbUpdateException("duplicate", error));
+        Assert.Equal("DUPLICATE_PROVIDER_OFFER", descriptor.Code);
         Assert.NotEqual(Guid.Empty, offerId);
     }
 

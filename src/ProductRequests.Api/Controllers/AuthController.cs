@@ -1,6 +1,7 @@
 using Microsoft.AspNetCore.Authorization;
 using Microsoft.AspNetCore.Mvc;
 using ProductRequests.Application.Auth;
+using ProductRequests.Application.Exceptions;
 
 namespace ProductRequests.Api.Controllers;
 
@@ -19,7 +20,7 @@ public sealed class AuthController(AuthService authService) : ControllerBase
         LoginResult result = await authService.LoginAsync(request.Email, request.Password, cancellationToken);
         if (!result.IsSuccess)
         {
-            return Unauthorized(new { code = result.ErrorCode });
+            throw new AuthenticationFailureException(result.ErrorCode!);
         }
 
         return Ok(new LoginResponse(result.AccessToken!, result.ExpiresIn, result.User!));

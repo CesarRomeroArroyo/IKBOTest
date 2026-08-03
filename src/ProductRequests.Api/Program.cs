@@ -1,10 +1,29 @@
 using Microsoft.OpenApi.Models;
+using Microsoft.AspNetCore.Mvc;
 using ProductRequests.Application;
+using ProductRequests.Api.ExceptionHandling;
 using ProductRequests.Infrastructure;
 
 var builder = WebApplication.CreateBuilder(args);
 
-builder.Services.AddControllers();
+builder.Services.AddControllers()
+    .ConfigureApiBehaviorOptions(options =>
+    {
+        options.InvalidModelStateResponseFactory = context =>
+        {
+            var problem = new ValidationProblemDetails(context.ModelState)
+            {
+                Type = "https://product-requests.local/errors/validation-error",
+                Title = "Validation failed",
+                Status = StatusCodes.Status400BadRequest,
+                Detail = "One or more validation errors occurred.",
+                Instance = context.HttpContext.Request.Path
+            };
+            problem.Extensions["code"] = "VALIDATION_ERROR";
+            problem.Extensions["traceId"] = context.HttpContext.TraceIdentifier;
+            return new BadRequestObjectResult(problem);
+        };
+    });
 builder.Services.AddEndpointsApiExplorer();
 builder.Services.AddSwaggerGen(options =>
 {
@@ -25,6 +44,7 @@ builder.Services.AddSwaggerGen(options =>
     });
 });
 builder.Services.AddProblemDetails();
+builder.Services.AddExceptionHandler<ApiExceptionHandler>();
 builder.Services.AddHealthChecks();
 builder.Services.AddApplication();
 builder.Services.AddInfrastructure(builder.Configuration);

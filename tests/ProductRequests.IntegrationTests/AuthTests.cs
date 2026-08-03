@@ -5,6 +5,7 @@ using System.Net.Http.Headers;
 using System.Net.Http.Json;
 using System.Security.Claims;
 using System.Text;
+using System.Text.Json;
 using Microsoft.AspNetCore.Identity;
 using Microsoft.AspNetCore.Mvc.Testing;
 using Microsoft.EntityFrameworkCore;
@@ -64,6 +65,9 @@ public sealed class AuthTests(MySqlFixture database) : IAsyncLifetime
         HttpResponseMessage response = await _client.PostAsJsonAsync("/api/auth/login", new { email, password });
 
         Assert.Equal(HttpStatusCode.Unauthorized, response.StatusCode);
+        using JsonDocument problem = JsonDocument.Parse(await response.Content.ReadAsStringAsync());
+        Assert.Equal("INVALID_CREDENTIALS", problem.RootElement.GetProperty("code").GetString());
+        Assert.False(string.IsNullOrWhiteSpace(problem.RootElement.GetProperty("traceId").GetString()));
     }
 
     [Fact]
