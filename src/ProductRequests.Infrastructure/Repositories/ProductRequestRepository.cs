@@ -23,6 +23,33 @@ internal sealed class ProductRequestRepository(ProductRequestsDbContext context)
             .ThenInclude(offer => offer.Histories)
             .SingleOrDefaultAsync(request => request.Offers.Any(offer => offer.Id == offerId), cancellationToken);
 
+    public async Task<ProductRequest?> GetByOfferIdForUpdateAsync(
+        Guid offerId,
+        CancellationToken cancellationToken)
+    {
+        Guid requestId = await context.Database
+            .SqlQuery<Guid>($"""
+                SELECT ProductRequestId AS Value
+                FROM Offers
+                WHERE Id = {offerId}
+                """)
+            .SingleOrDefaultAsync(cancellationToken);
+        if (requestId == Guid.Empty)
+        {
+            return null;
+        }
+
+        _ = await context.Database
+            .SqlQuery<Guid>($"""
+                SELECT Id AS Value
+                FROM ProductRequests
+                WHERE Id = {requestId}
+                FOR UPDATE
+                """)
+            .SingleAsync(cancellationToken);
+        return await GetByOfferIdAsync(offerId, cancellationToken);
+    }
+
     public async Task<(IReadOnlyList<ProductRequest> Items, int Total)> ListByClientAsync(
         Guid clientId,
         int page,

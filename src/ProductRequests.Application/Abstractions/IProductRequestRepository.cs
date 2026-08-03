@@ -7,6 +7,7 @@ public interface IProductRequestRepository
     Task<ProductRequest?> GetAsync(Guid id, CancellationToken cancellationToken);
     Task<ProductRequest?> GetReadOnlyAsync(Guid id, CancellationToken cancellationToken);
     Task<ProductRequest?> GetByOfferIdAsync(Guid offerId, CancellationToken cancellationToken);
+    Task<ProductRequest?> GetByOfferIdForUpdateAsync(Guid offerId, CancellationToken cancellationToken);
     Task<(IReadOnlyList<ProductRequest> Items, int Total)> ListByClientAsync(
         Guid clientId,
         int page,
