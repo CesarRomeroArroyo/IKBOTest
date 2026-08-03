@@ -17,6 +17,12 @@ internal sealed class ProductRequestRepository(ProductRequestsDbContext context)
         context.ProductRequests.AsNoTracking()
             .SingleOrDefaultAsync(request => request.Id == id, cancellationToken);
 
+    public Task<ProductRequest?> GetByOfferIdAsync(Guid offerId, CancellationToken cancellationToken) =>
+        context.ProductRequests
+            .Include(request => request.Offers)
+            .ThenInclude(offer => offer.Histories)
+            .SingleOrDefaultAsync(request => request.Offers.Any(offer => offer.Id == offerId), cancellationToken);
+
     public async Task<(IReadOnlyList<ProductRequest> Items, int Total)> ListByClientAsync(
         Guid clientId,
         int page,

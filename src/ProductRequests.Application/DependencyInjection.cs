@@ -2,6 +2,7 @@ using Microsoft.Extensions.DependencyInjection;
 using ProductRequests.Application.Auth;
 using ProductRequests.Application.Authorization;
 using ProductRequests.Application.ProductRequests;
+using ProductRequests.Application.Offers;
 
 namespace ProductRequests.Application;
 
@@ -12,6 +13,7 @@ public static class DependencyInjection
         services.AddScoped<AuthService>();
         services.AddScoped<ResourceAuthorizationService>();
         services.AddScoped<ProductRequestService>();
+        services.AddScoped<OfferService>();
         return services;
     }
 }

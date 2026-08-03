@@ -58,6 +58,7 @@ public static class DependencyInjection
                 options.UseMySQL(connectionString, mysql => mysql.MaxBatchSize(1)));
             services.AddScoped<IUserRepository, UserRepository>();
             services.AddScoped<IProductRequestRepository, ProductRequestRepository>();
+            services.AddScoped<IOfferReadRepository, OfferReadRepository>();
             services.AddScoped<IUnitOfWork, UnitOfWork>();
             services.AddScoped<DemoUserSeeder>();
         }
