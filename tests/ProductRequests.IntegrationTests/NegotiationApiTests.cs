@@ -253,6 +253,121 @@ public sealed class NegotiationApiTests(MySqlFixture database) : IAsyncLifetime
         Assert.Single(responses, item => item.StatusCode == HttpStatusCode.Conflict);
     }
 
+    [Fact]
+    public async Task ProviderAcceptsCounterOfferAndAwardsRequest()
+    {
+        NegotiationSetup setup = await CreateSetupAsync();
+        await SubmitCounterOfferAsync(setup.Offer1Id, 80);
+        await AuthenticateAsync("provider1@example.com");
+
+        HttpResponseMessage response = await _client.PostAsync(
+            $"/api/offers/{setup.Offer1Id}/counter-offer/accept",
+            null);
+
+        response.EnsureSuccessStatusCode();
+        OfferDecisionPayload result = (await response.Content.ReadFromJsonAsync<OfferDecisionPayload>())!;
+        Assert.Equal("Accepted", result.OfferStatus);
+        Assert.Equal("Awarded", result.ProductRequestStatus);
+        Assert.Equal(80m, result.AgreedAmount);
+        await using AsyncServiceScope scope = _factory.Services.CreateAsyncScope();
+        ProductRequestsDbContext context = scope.ServiceProvider.GetRequiredService<ProductRequestsDbContext>();
+        ProductRequest request = await context.ProductRequests.Include(item => item.Offers)
+            .ThenInclude(item => item.Histories)
+            .SingleAsync(item => item.Id == setup.RequestId);
+        Assert.Equal(OfferStatus.NotSelected,
+            request.Offers.Single(item => item.Id == setup.Offer2Id).Status);
+        Assert.Contains(request.Offers.Single(item => item.Id == setup.Offer1Id).Histories,
+            item => item.Action == OfferHistoryAction.CounterOfferAcceptedByProvider);
+    }
+
+    [Fact]
+    public async Task ProviderRejectsCounterOfferAndKeepsRequestOpen()
+    {
+        NegotiationSetup setup = await CreateSetupAsync();
+        await SubmitCounterOfferAsync(setup.Offer1Id, 80);
+        await AuthenticateAsync("provider1@example.com");
+
+        HttpResponseMessage response = await _client.PostAsJsonAsync(
+            $"/api/offers/{setup.Offer1Id}/counter-offer/reject",
+            new { reason = "Cannot reduce price" });
+
+        response.EnsureSuccessStatusCode();
+        OfferDecisionPayload result = (await response.Content.ReadFromJsonAsync<OfferDecisionPayload>())!;
+        Assert.Equal("Rejected", result.OfferStatus);
+        Assert.Equal("Open", result.ProductRequestStatus);
+        await using AsyncServiceScope scope = _factory.Services.CreateAsyncScope();
+        Offer offer = await scope.ServiceProvider.GetRequiredService<ProductRequestsDbContext>()
+            .Offers.Include(item => item.Histories)
+            .SingleAsync(item => item.Id == setup.Offer1Id);
+        Assert.Contains(offer.Histories,
+            item => item.Action == OfferHistoryAction.CounterOfferRejectedByProvider &&
+                    item.Comment == "Cannot reduce price");
+    }
+
+    [Fact]
+    public async Task CounterResponseEnforcesOwnerRoleAndState()
+    {
+        NegotiationSetup setup = await CreateSetupAsync();
+        await SubmitCounterOfferAsync(setup.Offer1Id, 80);
+
+        await AuthenticateAsync("provider2@example.com");
+        Assert.Equal(HttpStatusCode.Forbidden,
+            (await _client.PostAsync(
+                $"/api/offers/{setup.Offer1Id}/counter-offer/accept",
+                null)).StatusCode);
+        await AuthenticateAsync("client@example.com");
+        Assert.Equal(HttpStatusCode.Forbidden,
+            (await _client.PostAsync(
+                $"/api/offers/{setup.Offer1Id}/counter-offer/accept",
+                null)).StatusCode);
+
+        await AuthenticateAsync("provider1@example.com");
+        (await _client.PostAsync(
+            $"/api/offers/{setup.Offer1Id}/counter-offer/accept",
+            null)).EnsureSuccessStatusCode();
+        Assert.Equal(HttpStatusCode.Conflict,
+            (await _client.PostAsync(
+                $"/api/offers/{setup.Offer1Id}/counter-offer/accept",
+                null)).StatusCode);
+
+        NegotiationSetup noCounter = await CreateSetupAsync();
+        await AuthenticateAsync("provider1@example.com");
+        Assert.Equal(HttpStatusCode.Conflict,
+            (await _client.PostAsync(
+                $"/api/offers/{noCounter.Offer1Id}/counter-offer/accept",
+                null)).StatusCode);
+    }
+
+    [Fact]
+    public async Task ConcurrentInitialAndCounterAwardsProduceSingleWinner()
+    {
+        NegotiationSetup setup = await CreateSetupAsync();
+        await SubmitCounterOfferAsync(setup.Offer1Id, 80);
+        using HttpClient providerClient = _factory.CreateClient();
+        using HttpClient clientClient = _factory.CreateClient();
+        providerClient.DefaultRequestHeaders.Authorization = new AuthenticationHeaderValue(
+            "Bearer",
+            await GetTokenAsync("provider1@example.com"));
+        clientClient.DefaultRequestHeaders.Authorization = new AuthenticationHeaderValue(
+            "Bearer",
+            await GetTokenAsync("client@example.com"));
+
+        Task<HttpResponseMessage> counterAccept = providerClient.PostAsync(
+            $"/api/offers/{setup.Offer1Id}/counter-offer/accept",
+            null);
+        Task<HttpResponseMessage> initialAccept = clientClient.PostAsync(
+            $"/api/offers/{setup.Offer2Id}/accept",
+            null);
+        HttpResponseMessage[] responses = await Task.WhenAll(counterAccept, initialAccept);
+
+        Assert.Single(responses, item => item.StatusCode == HttpStatusCode.OK);
+        Assert.Single(responses, item => item.StatusCode == HttpStatusCode.Conflict);
+        await using AsyncServiceScope scope = _factory.Services.CreateAsyncScope();
+        ProductRequestsDbContext context = scope.ServiceProvider.GetRequiredService<ProductRequestsDbContext>();
+        Assert.Equal(1, await context.Offers.CountAsync(item =>
+            item.ProductRequestId == setup.RequestId && item.Status == OfferStatus.Accepted));
+    }
+
     private async Task<NegotiationSetup> CreateSetupAsync()
     {
         await AuthenticateAsync("client@example.com");
@@ -286,14 +401,27 @@ public sealed class NegotiationApiTests(MySqlFixture database) : IAsyncLifetime
 
     private async Task AuthenticateAsync(string email)
     {
-        HttpResponseMessage response = await _client.PostAsJsonAsync(
+        _client.DefaultRequestHeaders.Authorization = new AuthenticationHeaderValue(
+            "Bearer",
+            await GetTokenAsync(email));
+    }
+
+    private async Task<string> GetTokenAsync(string email)
+    {
+        using HttpResponseMessage response = await _client.PostAsJsonAsync(
             "/api/auth/login",
             new { email, password = "Passw0rd!" });
         response.EnsureSuccessStatusCode();
         using JsonDocument payload = JsonDocument.Parse(await response.Content.ReadAsStringAsync());
-        _client.DefaultRequestHeaders.Authorization = new AuthenticationHeaderValue(
-            "Bearer",
-            payload.RootElement.GetProperty("accessToken").GetString());
+        return payload.RootElement.GetProperty("accessToken").GetString()!;
+    }
+
+    private async Task SubmitCounterOfferAsync(Guid offerId, decimal amount)
+    {
+        await AuthenticateAsync("client@example.com");
+        (await _client.PostAsJsonAsync(
+            $"/api/offers/{offerId}/counter-offer",
+            new { amount, currency = "USD", comment = "Counter" })).EnsureSuccessStatusCode();
     }
 
     private sealed record NegotiationSetup(Guid RequestId, Guid Offer1Id, Guid Offer2Id);

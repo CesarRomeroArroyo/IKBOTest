@@ -62,4 +62,19 @@ public sealed class OffersController(OfferService service, NegotiationService ne
         CounterOfferCommand command,
         CancellationToken cancellationToken) =>
         negotiation.SubmitCounterOfferAsync(offerId, command, cancellationToken);
+
+    [HttpPost("offers/{offerId:guid}/counter-offer/accept")]
+    [Authorize(Policy = PolicyNames.Provider)]
+    public Task<OfferDecisionDto> AcceptCounterOffer(
+        Guid offerId,
+        CancellationToken cancellationToken) =>
+        negotiation.AcceptCounterOfferAsync(offerId, cancellationToken);
+
+    [HttpPost("offers/{offerId:guid}/counter-offer/reject")]
+    [Authorize(Policy = PolicyNames.Provider)]
+    public Task<OfferDecisionDto> RejectCounterOffer(
+        Guid offerId,
+        RejectOfferCommand command,
+        CancellationToken cancellationToken) =>
+        negotiation.RejectCounterOfferAsync(offerId, command.Reason, cancellationToken);
 }
