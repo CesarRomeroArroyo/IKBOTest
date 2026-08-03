@@ -1,0 +1,49 @@
+services:
+  mysql:
+    image: mysql:8.4.0
+    command:
+      - --character-set-server=utf8mb4
+      - --collation-server=utf8mb4_0900_ai_ci
+    environment:
+      MYSQL_DATABASE: ${MYSQL_DATABASE:-product_requests}
+      MYSQL_USER: ${MYSQL_USER:-product_requests}
+      MYSQL_PASSWORD: ${MYSQL_PASSWORD:-local_only_password}
+      MYSQL_ROOT_PASSWORD: ${MYSQL_ROOT_PASSWORD:-local_root_only_password}
+    volumes:
+      - product_requests_mysql:/var/lib/mysql
+    healthcheck:
+      test:
+        - CMD-SHELL
+        - mysqladmin ping -h localhost -u root -p"$$MYSQL_ROOT_PASSWORD" --silent
+      interval: 5s
+      timeout: 5s
+      retries: 20
+      start_period: 20s
+    restart: unless-stopped
+
+  api:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    environment:
+      ASPNETCORE_ENVIRONMENT: Development
+      ConnectionStrings__ProductRequests: Server=mysql;Port=3306;Database=${MYSQL_DATABASE:-product_requests};User=${MYSQL_USER:-product_requests};Password=${MYSQL_PASSWORD:-local_only_password};UseAffectedRows=true
+      Jwt__Issuer: ${JWT_ISSUER:-product-requests-local}
+      Jwt__Audience: ${JWT_AUDIENCE:-product-requests-local-client}
+      Jwt__SigningKey: ${JWT_SIGNING_KEY:-local-only-signing-key-change-before-any-shared-use}
+      Jwt__ExpirationMinutes: ${JWT_EXPIRATION_MINUTES:-60}
+    ports:
+      - "${API_PORT:-8080}:8080"
+    depends_on:
+      mysql:
+        condition: service_healthy
+    healthcheck:
+      test: ["CMD", "curl", "--fail", "--silent", "http://localhost:8080/health"]
+      interval: 10s
+      timeout: 5s
+      retries: 10
+      start_period: 10s
+    restart: unless-stopped
+
+volumes:
+  product_requests_mysql:
