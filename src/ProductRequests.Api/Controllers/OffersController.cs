@@ -4,13 +4,17 @@ using ProductRequests.Api.Authorization;
 using ProductRequests.Application.Common;
 using ProductRequests.Application.Offers;
 using ProductRequests.Application.Negotiation;
+using ProductRequests.Application.History;
 
 namespace ProductRequests.Api.Controllers;
 
 [ApiController]
 [Authorize]
 [Route("api")]
-public sealed class OffersController(OfferService service, NegotiationService negotiation) : ControllerBase
+public sealed class OffersController(
+    OfferService service,
+    NegotiationService negotiation,
+    HistoryService history) : ControllerBase
 {
     [HttpPost("product-requests/{requestId:guid}/offers")]
     [Authorize(Policy = PolicyNames.Provider)]
@@ -77,4 +81,10 @@ public sealed class OffersController(OfferService service, NegotiationService ne
         RejectOfferCommand command,
         CancellationToken cancellationToken) =>
         negotiation.RejectCounterOfferAsync(offerId, command.Reason, cancellationToken);
+
+    [HttpGet("offers/{offerId:guid}/history")]
+    public Task<IReadOnlyList<OfferHistoryDto>> GetHistory(
+        Guid offerId,
+        CancellationToken cancellationToken) =>
+        history.GetAsync(offerId, cancellationToken);
 }

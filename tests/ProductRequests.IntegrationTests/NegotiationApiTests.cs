@@ -368,6 +368,41 @@ public sealed class NegotiationApiTests(MySqlFixture database) : IAsyncLifetime
             item.ProductRequestId == setup.RequestId && item.Status == OfferStatus.Accepted));
     }
 
+    [Fact]
+    public async Task OfferHistoryIsChronologicalAndVisibleOnlyToOwners()
+    {
+        NegotiationSetup setup = await CreateSetupAsync();
+        await SubmitCounterOfferAsync(setup.Offer1Id, 80);
+        await AuthenticateAsync("provider1@example.com");
+        (await _client.PostAsJsonAsync(
+            $"/api/offers/{setup.Offer1Id}/counter-offer/reject",
+            new { reason = "No margin" })).EnsureSuccessStatusCode();
+
+        HistoryPayload[] providerHistory = (await _client.GetFromJsonAsync<HistoryPayload[]>(
+            $"/api/offers/{setup.Offer1Id}/history"))!;
+        Assert.Equal(
+            ["OfferSubmitted", "CounterOfferSubmittedByClient", "CounterOfferRejectedByProvider"],
+            providerHistory.Select(item => item.Action));
+        Assert.Equal(providerHistory.OrderBy(item => item.OccurredAt).ThenBy(item => item.Id), providerHistory);
+        Assert.Equal("Provider", providerHistory.Last().ActorRole);
+        Assert.Equal("No margin", providerHistory.Last().Comment);
+
+        await AuthenticateAsync("client@example.com");
+        Assert.Equal(HttpStatusCode.OK,
+            (await _client.GetAsync($"/api/offers/{setup.Offer1Id}/history")).StatusCode);
+        Assert.Equal(HttpStatusCode.MethodNotAllowed,
+            (await _client.PostAsJsonAsync(
+                $"/api/offers/{setup.Offer1Id}/history",
+                new { action = "tamper" })).StatusCode);
+
+        await AuthenticateAsync("provider2@example.com");
+        Assert.Equal(HttpStatusCode.Forbidden,
+            (await _client.GetAsync($"/api/offers/{setup.Offer1Id}/history")).StatusCode);
+        await AuthenticateAsync("client2@example.com");
+        Assert.Equal(HttpStatusCode.Forbidden,
+            (await _client.GetAsync($"/api/offers/{setup.Offer1Id}/history")).StatusCode);
+    }
+
     private async Task<NegotiationSetup> CreateSetupAsync()
     {
         await AuthenticateAsync("client@example.com");
@@ -431,4 +466,13 @@ public sealed class NegotiationApiTests(MySqlFixture database) : IAsyncLifetime
         string ProductRequestStatus,
         decimal? AgreedAmount,
         Guid? AcceptedOfferId);
+    private sealed record HistoryPayload(
+        Guid Id,
+        string Action,
+        string ActorRole,
+        string? PreviousStatus,
+        string? NewStatus,
+        decimal? Amount,
+        string? Comment,
+        DateTimeOffset OccurredAt);
 }

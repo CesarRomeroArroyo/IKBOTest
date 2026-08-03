@@ -4,6 +4,7 @@ using ProductRequests.Application.Authorization;
 using ProductRequests.Application.ProductRequests;
 using ProductRequests.Application.Offers;
 using ProductRequests.Application.Negotiation;
+using ProductRequests.Application.History;
 
 namespace ProductRequests.Application;
 
@@ -16,6 +17,7 @@ public static class DependencyInjection
         services.AddScoped<ProductRequestService>();
         services.AddScoped<OfferService>();
         services.AddScoped<NegotiationService>();
+        services.AddScoped<HistoryService>();
         return services;
     }
 }
