@@ -44,6 +44,21 @@ public sealed class PersistenceTests(MySqlFixture fixture)
         long tableCount = Convert.ToInt64(await command.ExecuteScalarAsync(), CultureInfo.InvariantCulture);
 
         Assert.Equal(4, tableCount);
+        command.CommandText = """
+            SELECT COUNT(DISTINCT index_name)
+            FROM information_schema.statistics
+            WHERE table_schema = DATABASE()
+              AND index_name IN (
+                'IX_ProductRequests_Status',
+                'IX_ProductRequests_ClientId',
+                'IX_Offers_ProductRequestId',
+                'IX_Offers_ProviderId',
+                'IX_OfferHistories_OfferId_OccurredAt',
+                'UX_Offers_ProductRequestId_ProviderId',
+                'UX_Users_NormalizedEmail');
+            """;
+        long indexCount = Convert.ToInt64(await command.ExecuteScalarAsync(), CultureInfo.InvariantCulture);
+        Assert.Equal(7, indexCount);
         Assert.Contains(context.Model.GetEntityTypes().SelectMany(entity => entity.GetIndexes()),
             index => index.GetDatabaseName() == "UX_Offers_ProductRequestId_ProviderId" && index.IsUnique);
     }

@@ -6,8 +6,10 @@ namespace ProductRequests.IntegrationTests;
 
 public sealed class MySqlFixture : IAsyncLifetime
 {
+    private const string MySqlImage = "mysql:8.4.0";
+
     private readonly MySqlContainer _container = new MySqlBuilder()
-        .WithImage("mysql:8.4.0")
+        .WithImage(MySqlImage)
         .WithDatabase("product_requests_tests")
         .WithUsername("product_requests_tests")
         .WithPassword("integration_tests_only")
